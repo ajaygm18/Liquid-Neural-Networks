@@ -2,8 +2,8 @@ from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS, cross_origin
 from pandas_datareader import data as pdr
 import yfinance as yf
-import pandas_ta as ta
 import pandas as pd
+import basic_ta as ta
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error
@@ -183,7 +183,13 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 
 
 def feature_engineering(data):
-  data.ta.macd(close='Adj Close', fast=14, slow=21, append=True) # 14 & 21 Day MACD
+  # Add TA accessor to dataframe
+  ta.add_ta_functions(data)
+  
+  # 14 & 21 Day MACD
+  macd_result = ta.macd(data, close='Adj Close', fast=14, slow=21, signal=9)
+  data = pd.concat([data, macd_result], axis=1)
+  
   # Pivot Points (Standard Pivot Levels)
   pivot_data = data[['High', 'Low', 'Adj Close']].copy()
 
@@ -203,25 +209,25 @@ def feature_engineering(data):
   data['5-Day Momentum'] = data['Adj Close'] - data['Adj Close'].shift(5)
 
   # 14-Day Average True Range (ATR)
-  data['14-Day ATR'] = data.ta.atr(length=14)
+  data['14-Day ATR'] = ta.atr(data, high='High', low='Low', close='Adj Close', length=14)
 
   # 14 Day Simple & Exponential Moving Average
   data['14 Day SMA'] = data['Adj Close'].rolling(window=14).mean()
   data['14 Day EMA'] = data['Adj Close'].ewm(span=14, adjust=False).mean()
 
   # 14-Day Relative Strength Index (RSI)
-  data['14-Day RSI'] = data.ta.rsi(close='Adj Close', length=14)
+  data['14-Day RSI'] = ta.rsi(data, close='Adj Close', length=14)
 
   # 14 Day Bollinger Bands
-  bollinger = data.ta.bbands(length=14, std=2)
+  bollinger = ta.bbands(data, close='Adj Close', length=14, std=2)
   data = data.join(bollinger)
 
   # On Balance Volume (OBV)
-  data['OBV'] = data.ta.obv(close='Adj Close', volume='Volume')
+  data['OBV'] = ta.obv(data, close='Adj Close', volume='Volume')
 
   # 14 Day Fast, Slow & Smoothed Slow Stochastic Indicators
-  stoch = data.ta.stoch(high='High', low='Low', close='Adj Close', fastk=14)
-  slow_stoch = data.ta.stoch(high='High', low='Low', close='Adj Close', k=3, d=3)
+  stoch = ta.stoch(data, high='High', low='Low', close='Adj Close', fastk=14, d=3)
+  slow_stoch = ta.stoch(data, high='High', low='Low', close='Adj Close', fastk=3, d=3)
   data = data.join(stoch).join(slow_stoch)
 
   # Fibonacci Retracement Levels
@@ -258,7 +264,7 @@ def predict():
   print(f"start date {start_date}, end date {end_date} stock name {stock_name}")
   print(f"start date {type(start_date)}, end date {type(end_date)} stock name {type(stock_name)}")
   yf.pdr_override()
-  data = pdr.get_data_yahoo(stock_name, start=start_date, end=end_date)
+  data = pdr.get_data_yahoo(stock_name, start=start_date, end=end_date, auto_adjust=False)
   last_row = data.iloc[-1]
 
   open_price = last_row['Open']
