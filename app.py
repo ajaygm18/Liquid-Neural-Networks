@@ -1,6 +1,5 @@
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS, cross_origin
-from pandas_datareader import data as pdr
 import yfinance as yf
 import talib
 import pandas as pd
@@ -183,8 +182,14 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 
 
 def feature_engineering(data):
+  # Convert data to float64 for TA-Lib compatibility
+  high = data['High'].astype(np.float64).values
+  low = data['Low'].astype(np.float64).values
+  close = data['Adj Close'].astype(np.float64).values
+  volume = data['Volume'].astype(np.float64).values
+  
   # MACD using TA-Lib
-  macd, macdsignal, macdhist = talib.MACD(data['Adj Close'].values, fastperiod=14, slowperiod=21, signalperiod=9)
+  macd, macdsignal, macdhist = talib.MACD(close, fastperiod=14, slowperiod=21, signalperiod=9)
   data['MACD_14_21_9'] = macd
   data['MACDs_14_21_9'] = macdsignal  
   data['MACDh_14_21_9'] = macdhist
@@ -208,34 +213,34 @@ def feature_engineering(data):
   data['5-Day Momentum'] = data['Adj Close'] - data['Adj Close'].shift(5)
 
   # 14-Day Average True Range (ATR) using TA-Lib
-  data['14-Day ATR'] = talib.ATR(data['High'].values, data['Low'].values, data['Adj Close'].values, timeperiod=14)
+  data['14-Day ATR'] = talib.ATR(high, low, close, timeperiod=14)
 
   # 14 Day Simple & Exponential Moving Average
   data['14 Day SMA'] = data['Adj Close'].rolling(window=14).mean()
   data['14 Day EMA'] = data['Adj Close'].ewm(span=14, adjust=False).mean()
 
   # 14-Day Relative Strength Index (RSI) using TA-Lib
-  data['14-Day RSI'] = talib.RSI(data['Adj Close'].values, timeperiod=14)
+  data['14-Day RSI'] = talib.RSI(close, timeperiod=14)
 
   # 14 Day Bollinger Bands using TA-Lib
-  bb_upper, bb_middle, bb_lower = talib.BBANDS(data['Adj Close'].values, timeperiod=14, nbdevup=2, nbdevdn=2)
+  bb_upper, bb_middle, bb_lower = talib.BBANDS(close, timeperiod=14, nbdevup=2, nbdevdn=2)
   data['BBL_14_2.0'] = bb_lower
   data['BBM_14_2.0'] = bb_middle
   data['BBU_14_2.0'] = bb_upper
   data['BBB_14_2.0'] = (bb_upper - bb_lower) / bb_middle
-  data['BBP_14_2.0'] = (data['Adj Close'] - bb_lower) / (bb_upper - bb_lower)
+  data['BBP_14_2.0'] = (close - bb_lower) / (bb_upper - bb_lower)
 
   # On Balance Volume (OBV) using TA-Lib
-  data['OBV'] = talib.OBV(data['Adj Close'].values, data['Volume'].values)
+  data['OBV'] = talib.OBV(close, volume)
 
   # 14 Day Fast, Slow & Smoothed Slow Stochastic Indicators using TA-Lib
-  slowk, slowd = talib.STOCH(data['High'].values, data['Low'].values, data['Adj Close'].values, 
+  slowk, slowd = talib.STOCH(high, low, close, 
                              fastk_period=14, slowk_period=3, slowk_matype=0, slowd_period=3, slowd_matype=0)
   data['STOCHk_14_3_3'] = slowk
   data['STOCHd_14_3_3'] = slowd
   
   # Additional Stochastic with different parameters
-  slowk2, slowd2 = talib.STOCH(data['High'].values, data['Low'].values, data['Adj Close'].values, 
+  slowk2, slowd2 = talib.STOCH(high, low, close, 
                                fastk_period=3, slowk_period=3, slowk_matype=0, slowd_period=3, slowd_matype=0)
   data['STOCHk_3_3_3'] = slowk2
   data['STOCHd_3_3_3'] = slowd2
@@ -273,8 +278,9 @@ def predict():
   stock_name = data["stockName"]
   print(f"start date {start_date}, end date {end_date} stock name {stock_name}")
   print(f"start date {type(start_date)}, end date {type(end_date)} stock name {type(stock_name)}")
-  yf.pdr_override()
-  data = pdr.get_data_yahoo(stock_name, start=start_date, end=end_date, auto_adjust=False)
+  # Use yfinance directly instead of pdr_override
+  ticker = yf.Ticker(stock_name)
+  data = ticker.history(start=start_date, end=end_date, auto_adjust=False)
   last_row = data.iloc[-1]
 
   open_price = last_row['Open']
